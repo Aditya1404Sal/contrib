@@ -15,6 +15,6 @@ use provider::CronProvider;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     CronProvider::run().await?;
-    eprintln!("Custom template provider exiting");
+    eprintln!("Cronjob provider exiting");
     Ok(())
 }
