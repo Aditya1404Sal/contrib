@@ -3,6 +3,9 @@ apiVersion: core.oam.dev/v1beta1
 kind: Application
 metadata:
   name: cron-scheduler-demo
+  annotations:
+    version: v0.0.1
+    description: "A cron job scheduler demo"
 spec:
   components:
     # The Rust Wasm component
@@ -30,8 +33,9 @@ spec:
             namespace: wasmcloud
             package: cron
             interfaces: [scheduler]
-            target_config:
+            source:
+              config:
               - name: cron-config
                 properties:
                   cluster_uri: nats://127.0.0.1:4222
-                  cronjobs: job_1=0 * 1 * * ?:{"x1":"foo","x2":"bar"};
+                  cronjobs: job_1=0 * 1 * * ?:{"x1":"foo","x2":"bar"}
