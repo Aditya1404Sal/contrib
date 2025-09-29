@@ -1,7 +1,9 @@
-package bettyblocks:mysql@1.0.0;
+package wasmcloud:mysql@1.0.0;
 
+/// Types used by components and providers of a SQLDB MySQL interface
 interface types {
-    /// Errors that occur while executing queries
+
+  /// Errors that occur while executing queries
   variant query-error {
     /// Unknown/invalid query parameters
     invalid-params(string),
@@ -27,50 +29,69 @@ interface types {
     unexpected(string),
   }
 
+  /// This type of floating point is necessary as rust does not allow Eq/PartialEq/Hash on real `f64`
+  /// Instead we use a sign + mantissa + exponent
+  ///
+  /// see: https://docs.rs/num/latest/num/trait.Float.html#tymethod.integer_decode
   type hashable-f64 = tuple<u64, s16, s8>;
   type hashable-f32 = hashable-f64;
 
   type column-name = string;
 
-  /// Arbitrary Precision metric
+  /// Arbitrary precision numeric type
   type decimal = string;
 
-  type mysql-set = list<string>;
+  /// MySQL SET type - represents a set of string values
+  type set = list<string>;
 
-  type mysql-enum = string;
+  /// MySQL ENUM type - represents an enumeration
+  type %enum = string;
 
-  record mysql-date {
-    year : u32,
-    month : u32,
-    day : u32
-  }
-  /// Time can be negative according to mysql crate [https://docs.rs/mysql/latest/mysql/enum.Value.html#variant.Time]
-  record mysql-time {
-    isnegative : bool,
-    hour : u32,
-    minute : u32,
-    second : u32, 
-    microsecond : u32,
+  /// MySQL's date representation
+  record date {
+    year: u32,
+    month: u32,
+    day: u32,
   }
 
-  record mysql-datetime {
-    date : mysql-date,
-    time : mysql-time,
+  /// MySQL's time representation
+  /// Can represent both time-of-day and time intervals (including negative)
+  record time {
+    negative: bool,
+    hour: u32,
+    minute: u32,
+    second: u32,
+    microsecond: u32,
   }
 
-  /// Mysql Timestamp is internal, UTC auto-conversion is done according to db config set timezone.
-  record mysql-timestamp {
-    datetime: mysql-datetime,
+  /// MySQL's datetime representation
+  record datetime {
+    date: date,
+    time: time,
   }
 
-  /// Year value (range 1901–2155).
-  variant mysql-year {
+  /// MySQL TIMESTAMP - stored as UTC internally, converted based on session timezone
+  record timestamp {
+    datetime: datetime,
+  }
+
+  /// MySQL's year representation
+  variant year {
     year-two(u8),
     year-four(u32),
   }
 
+  /// MySQL data values, usable as parameters or via queries
+  /// see: https://dev.mysql.com/doc/refman/8.0/en/data-types.html
+  ///
+  /// This datatype is primarily intended to be used with the `raw` encoding scheme.
+  ///
+  /// NOTE: MySQL does not support native arrays like PostgreSQL.
+  /// For array-like functionality, use JSON or separate normalized tables.
+  /// NOTE: all numeric values are little-endian unless otherwise specified
   variant mysql-value {
     null,
+
     // Numeric Types
     /// TINYINT[(M)] [UNSIGNED] - 1 byte integer (-128 to 127)
     tinyint(s8),
@@ -110,63 +131,75 @@ interface types {
     double(hashable-f64),
     real(hashable-f64),
 
-    /// BIT[(M)] - Bit-field (default 1, max 64 bits)
+    /// BIT[(M)] - Bit-field (default 1, max 64 bits in MySQL)
     bit(tuple<u8, list<u8>>),
+
+    /// BOOLEAN/BOOL - Synonyms for TINYINT(1)
+    %bool(bool), 
+    boolean(bool),
 
     // Date and Time Types
     /// DATE - 'YYYY-MM-DD'
-    date(mysql-date),
+    date(date),
     
     /// TIME[(fsp)] - '[hh:mm:ss[.fraction]]', fsp: 0–6
-    time(mysql-time),
+    time(time),
     
     /// DATETIME[(fsp)] - 'YYYY-MM-DD hh:mm:ss[.fraction]', fsp: 0–6
-    datetime(mysql-datetime),
+    datetime(datetime),
     
     /// TIMESTAMP[(fsp)] - Same as DATETIME; stored UTC, auto-convert
-    timestamp(mysql-timestamp),
+    timestamp(timestamp),
     
     /// YEAR[(2|4)] - Year value (range 1901–2155)
-    year(mysql-year),
+    year(year),
 
-    // String and Binary Types
+    // String Types - MySQL uses UTF-8 by default, so string is appropriate
     /// CHAR(M) - Fixed length string (0–255 chars)
     %char(tuple<u32, string>),
     
     /// VARCHAR(M) - Variable length string (0–65,535 chars)
     varchar(tuple<u32, string>),
     
+    // Text Types
+    /// TINYTEXT - Max 255 characters
+    tinytext(string),
+    /// TEXT - Max 65,535 characters
+    text(string),
+    /// MEDIUMTEXT - Max 16,777,215 characters
+    mediumtext(string),
+    /// LONGTEXT - Max 4,294,967,295 characters
+    longtext(string),
+
+    // Binary Types - use bytes for true binary data
     /// BINARY(M) - Fixed binary (0–255 bytes)
     binary(tuple<u32, list<u8>>),
     
     /// VARBINARY(M) - Variable binary (0–65,535 bytes)
     varbinary(tuple<u32, list<u8>>),
 
-    // Blob/Text Types
-    /// TINYBLOB / TINYTEXT - Max 255 bytes/chars
+    // BLOB Types - binary large objects
+    /// TINYBLOB - Max 255 bytes
     tinyblob(list<u8>),
-    tinytext(string),
-    
-    /// BLOB / TEXT - Max 65,535 bytes/characters
+    /// BLOB - Max 65,535 bytes
     blob(list<u8>),
-    text(string),
-    
-    /// MEDIUMBLOB / MEDIUMTEXT - Max 16,777,215 bytes/characters
+    /// MEDIUMBLOB - Max 16,777,215 bytes
     mediumblob(list<u8>),
-    mediumtext(string),
-    
-    /// LONGBLOB / LONGTEXT - Max 4,294,967,295 bytes/characters
+    /// LONGBLOB - Max 4,294,967,295 bytes
     longblob(list<u8>),
-    longtext(string),
 
-    // Set Types
+    // specific Set Types
     /// ENUM('value1',...) - One value from set
-    mysql-enum(mysql-enum),
+    %enum(%enum),
     
     /// SET('value1',...) - Zero or more values from set
-    mysql-set(mysql-set),
+    set(set),
 
-    // Spatial Types
+    // JSON Type (MySQL 5.7+)
+    /// JSON - Native JSON storage/query support
+    json(string),
+
+    // Spatial Types (MySQL spatial extensions) - stored as Well-Known Binary
     /// GEOMETRY - Any spatial value
     geometry(list<u8>),
     
@@ -190,17 +223,13 @@ interface types {
     
     /// GEOMETRYCOLLECTION - Collection of spatial objects
     geometrycollection(list<u8>),
-
-    // Other Types
-    /// JSON - Native JSON storage/query support
-    json(string),
-    
-    /// BOOL, BOOLEAN - Synonyms for TINYINT(1)
-    boolean(bool),
   }
+
   record result-row-entry {
-    column-name : string,
-    value : mysql-value,
+    /// Name of the result column
+    column-name: string,
+    /// Value of the result column
+    value: mysql-value,
   }
 
   type result-row = list<result-row-entry>;

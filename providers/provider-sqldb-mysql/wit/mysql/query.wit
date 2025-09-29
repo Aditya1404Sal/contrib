@@ -1,4 +1,4 @@
-package bettyblocks:mysql@1.0.0;
+package wasmcloud:mysql@1.0.0;
 
 /// Interface for querying a MySQL database
 interface query {

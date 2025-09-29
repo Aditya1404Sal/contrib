@@ -1,15 +1,12 @@
 use anyhow::Result;
 
 /// MySQL database provider
-pub struct MysqlProvider {
-}
+pub struct MysqlProvider {}
 
 impl MysqlProvider {
     /// Create a new MySQL provider instance
     pub fn new() -> Self {
-        Self {
-            
-        }
+        Self {}
     }
 
     /// Run the provider

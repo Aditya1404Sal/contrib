@@ -1,6 +1,6 @@
-mod provider;
 mod bindings;
 mod config;
+mod provider;
 
 use provider::MysqlProvider;
 
