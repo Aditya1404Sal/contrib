@@ -1,0 +1,6 @@
+package bettyblocks:provider-sqldb-mysql;
+
+world interfaces{
+    export bettyblocks:mysql/query@1.0.0;
+    export bettyblocks:mysql/prepared@1.0.0;
+}
