@@ -1,0 +1,21 @@
+[package]
+name = "bettyblocks-provider-sqldb-mysql"
+version = "0.1.0"
+edition = "2021"
+description = """
+Bettyblocks SQL database provider for Mysql
+"""
+
+[workspace]
+
+[badges.maintenance]
+status = "actively-developed"
+
+[dependencies]
+anyhow = "1.0"
+tokio = { version = "1", features = ["full"] }
+wasmcloud-core = { version = "0.20", features = ["messaging"]}
+wasmcloud-provider-sdk = { version = "0.16.0", features = ["otel"] }
+wasmcloud-provider-messaging-nats = "0.27.0"
+wit-bindgen-wrpc = "0.9.0"
+wascap = "0.16"

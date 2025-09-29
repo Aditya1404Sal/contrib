@@ -1,0 +1,9 @@
+name = "sqldb Mysql Provider"
+language = "rust"
+type = "provider"
+
+[overrides]
+"bettyblocks:mysql" = { path = "./wit//mysql" }
+
+[provider]
+vendor = "Bettyblocks"
