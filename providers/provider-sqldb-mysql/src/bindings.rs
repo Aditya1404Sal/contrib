@@ -1,15 +1,12 @@
 //! This module contains generated bindings, and code to make bindings more ergonomic
 //!
-use std::collections::HashMap;
-use std::error::Error;
-use std::str::FromStr;
+// use std::collections::HashMap;
+// use std::error::Error;
+// use std::str::FromStr;
 
 use anyhow::{bail, Context as _};
 use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
-use mysql_async::{
-    prelude::{FromValue, ToValue},
-    FromValueError, Row, Value as MySqlValue,
-};
+use mysql_async::{Row, Value as MySqlValue};
 use num_traits::Float;
 use serde_json;
 
@@ -48,6 +45,158 @@ fn f64_from_components(mantissa: u64, exponent: i16, sign: i8) -> f64 {
 /// Build an `f64` from a simple tuple of mantissa, exponent and sign
 fn f64_from_tuple(t: &(u64, i16, i8)) -> f64 {
     f64_from_components(t.0, t.1, t.2)
+}
+
+/// Convert MySQL date to chrono NaiveDate
+impl TryFrom<&Date> for NaiveDate {
+    type Error = anyhow::Error;
+
+    fn try_from(d: &Date) -> anyhow::Result<NaiveDate> {
+        NaiveDate::from_ymd_opt(d.year as i32, d.month, d.day).with_context(|| {
+            format!(
+                "failed to build date from ymd ({}/{}/{})",
+                d.year, d.month, d.day
+            )
+        })
+    }
+}
+
+impl From<NaiveDate> for Date {
+    fn from(nd: NaiveDate) -> Date {
+        Date {
+            year: nd.year() as u32,
+            month: nd.month(),
+            day: nd.day(),
+        }
+    }
+}
+
+/// Convert MySQL time to chrono NaiveTime
+impl TryFrom<&Time> for NaiveTime {
+    type Error = anyhow::Error;
+
+    fn try_from(t: &Time) -> anyhow::Result<NaiveTime> {
+        // Handle negative time (MySQL supports negative TIME for intervals)
+        if t.negative {
+            bail!("Negative time intervals cannot be converted to NaiveTime");
+        }
+
+        NaiveTime::from_hms_micro_opt(t.hour, t.minute, t.second, t.microsecond).with_context(
+            || {
+                format!(
+                    "failed to convert time [{}h {}m {}s {}micro]",
+                    t.hour, t.minute, t.second, t.microsecond
+                )
+            },
+        )
+    }
+}
+
+impl From<NaiveTime> for Time {
+    fn from(nt: NaiveTime) -> Time {
+        Time {
+            negative: false,
+            hour: nt.hour(),
+            minute: nt.minute(),
+            second: nt.second(),
+            microsecond: nt.nanosecond() / 1_000,
+        }
+    }
+}
+
+/// Convert MySQL datetime to chrono NaiveDateTime
+impl TryFrom<&Datetime> for NaiveDateTime {
+    type Error = anyhow::Error;
+
+    fn try_from(dt: &Datetime) -> anyhow::Result<NaiveDateTime> {
+        let date: NaiveDate = (&dt.date).try_into()?;
+        let time: NaiveTime = (&dt.time).try_into()?;
+        Ok(NaiveDateTime::new(date, time))
+    }
+}
+
+impl From<NaiveDateTime> for Datetime {
+    fn from(ndt: NaiveDateTime) -> Datetime {
+        Datetime {
+            date: ndt.date().into(),
+            time: ndt.time().into(),
+        }
+    }
+}
+
+/// Convert MySQL timestamp to chrono NaiveDateTime
+impl TryFrom<&Timestamp> for NaiveDateTime {
+    type Error = anyhow::Error;
+
+    fn try_from(ts: &Timestamp) -> anyhow::Result<NaiveDateTime> {
+        (&ts.datetime).try_into()
+    }
+}
+
+impl From<NaiveDateTime> for Timestamp {
+    fn from(ndt: NaiveDateTime) -> Timestamp {
+        Timestamp {
+            datetime: ndt.into(),
+        }
+    }
+}
+
+/// Error conversion functions
+pub(crate) fn mysql_error_to_query_error(err: mysql_async::Error) -> QueryError {
+    match err {
+        mysql_async::Error::Driver(driver_err) => {
+            QueryError::InvalidParams(format!("Driver error: {}", driver_err))
+        }
+        mysql_async::Error::Server(server_err) => {
+            if server_err.message.contains("syntax error")
+                || server_err.message.contains("SQL syntax")
+            {
+                QueryError::InvalidQuery(format!("SQL syntax error: {}", server_err.message))
+            } else {
+                QueryError::InvalidParams(format!("Server error: {}", server_err.message))
+            }
+        }
+        mysql_async::Error::Io(io_err) => QueryError::Unexpected(format!("IO error: {}", io_err)),
+        mysql_async::Error::Url(url_err) => {
+            QueryError::Unexpected(format!("Connection URL error: {}", url_err))
+        }
+        other => QueryError::Unexpected(format!("MySQL error: {}", other)),
+    }
+}
+
+pub(crate) fn mysql_error_to_prepared_error(err: mysql_async::Error) -> PreparedStatementExecError {
+    match err {
+        mysql_async::Error::Server(server_err)
+            if server_err.message.contains("Unknown prepared statement") =>
+        {
+            PreparedStatementExecError::UnknownPreparedQuery
+        }
+        other => PreparedStatementExecError::QueryError(mysql_error_to_query_error(other)),
+    }
+}
+
+pub(crate) fn mysql_error_to_statement_prepare_error(
+    err: mysql_async::Error,
+) -> StatementPrepareError {
+    StatementPrepareError::Unexpected(format!("Failed to prepare statement: {}", err))
+}
+
+/// Build a `ResultRow` from a MySQL [`Row`]
+pub(crate) fn into_result_row(row: Row) -> anyhow::Result<ResultRow> {
+    let mut result_entries: ResultRow = Vec::new();
+    let columns = row.columns_ref();
+
+    for (i, column) in columns.iter().enumerate() {
+        let mysql_val: MySqlValue = row.get(i).unwrap_or(MySqlValue::NULL);
+        let wit_val: MysqlValue = mysql_value_to_wit_value(mysql_val, column)?;
+
+        result_entries.push(ResultRowEntry {
+            column_name: column.name_str().to_string(),
+            value: wit_val,
+        });
+    }
+
+    Ok(result_entries)
 }
 
 /// Enhanced conversion from MySQL driver value to WIT value using column metadata
@@ -465,7 +614,7 @@ pub(crate) fn mysql_year_to_u16(year: &Year) -> u16 {
     }
 }
 
-/// Convert u16 year back to MySQL Year type 
+/// Convert u16 year back to MySQL Year type
 pub(crate) fn u16_to_mysql_year(year: u16) -> Year {
     if year >= 2000 && year <= 2069 {
         Year::YearTwo((year - 2000) as u8)
